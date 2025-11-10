@@ -699,7 +699,10 @@ class PrecioLuzEntity(CoordinatorEntity, SensorEntity):
                 precio_luz_entity = None
 
             if all([precio_luz_entity, paused_switch, v2c_carga_pvpc_switch, max_price_entity]):
-                max_price = float(max_price_entity.state)
+                try:
+                    max_price = float(max_price_entity.state)
+                except (ValueError,TypeError):
+                    max_price = 0.0
                 current_hour = datetime.now().hour
 
                 self.valid_hours, self.valid_hours_next_day, self.total_hours = await extract_price_attrs(
