@@ -2,17 +2,18 @@
   "domain": "v2c_trydan",
   "name": "V2C Trydan",
   "after_dependencies": [],
-  "codeowners": ["@Rain1971"],
+  "codeowners": ["@Rain1971", "@victorrossetti-bit"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/Rain1971/V2C_trydant/blob/main/README.md",
+  "documentation": "https://github.com/victorrossetti-bit/V2C_trydant",
   "homekit": {},
   "integration_type": "device",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/Rain1971/V2C_trydant/issues",
+  "issue_tracker": "https://github.com/victorrossetti-bit/V2C_trydant/issues",
   "quality_scale": "internal",
   "requirements": ["aiohttp>=3.8.0", "tenacity>=8.0.0"],
   "ssdp": [],
-  "version": "4.0.2",
-  "zeroconf": []
+  "version": "4.0.3-energytarget",
+  "zeroconf": [],
+  "services": "services.yaml"
 }
