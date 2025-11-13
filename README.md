@@ -5,7 +5,11 @@
 [![en](https://img.shields.io/badge/lang-en-red.svg)](https://github.com/Rain1971/V2C_trydant/blob/main/README.md)
 [![es](https://img.shields.io/badge/lang-es-yellow.svg)](https://github.com/Rain1971/V2C_trydant/blob/main/README.es.md)
 
-This integration exposes the information and functions made available by [V2C trydan](https://v2charge.com/trydan/) directly via http interface in Home Assistant.
+# WARNING: This is still very alpha code. DON'T INSTALL YET, please refer to the original stable project by @Rain1971
+
+This integration exposes the information and functions made available by [V2C trydan](https://v2charge.com/trydan/) directly via http interface in Home Assistant. This is a fork of the original project by @Rain1971, aiming to add a charging goal in KWh, rather than in Km, useful if you have different vehicles to charge, with different consumption rates and batteries. 
+
+
 
 # Prerequisites
 
