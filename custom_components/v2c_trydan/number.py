@@ -1,4 +1,4 @@
-from homeassistant.components.number import NumberEntity, RestoreNumber
+from homeassistant.components.number import NumberEntity
 from homeassistant.components.sensor import SensorStateClass
 from homeassistant.const import DEVICE_DEFAULT_NAME, CONF_IP_ADDRESS
 from homeassistant.helpers import config_validation as cv
@@ -23,6 +23,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     async_add_entities([MaxIntensityNumber(coordinator)])
     async_add_entities([MinIntensityNumber(coordinator)])
     async_add_entities([KmToChargeNumber(hass, ip_address)])
+    async_add_entities([EnergyToChargeNumber(hass, ip_address)])
     async_add_entities([IntensityNumber(coordinator)])
     async_add_entities([MaxPrice(hass, ip_address)])
 
@@ -221,7 +222,7 @@ class MinIntensityNumber(CoordinatorEntity, NumberEntity):
             raise
 
 
-class KmToChargeNumber(RestoreNumber):
+class KmToChargeNumber(NumberEntity):
     """Representation of km to charge number entity."""
     
     def __init__(self, hass, ip_address):
@@ -278,13 +279,58 @@ class KmToChargeNumber(RestoreNumber):
         else:
             _LOGGER.error("v2c_km_to_charge must be between 0 and 1000")
 
-    async def async_added_to_hass(self) -> None:
-        """When entity is added to Home Assistant."""
-        await super().async_added_to_hass()
+# --- NUEVO: número objetivo en kWh ---
+class EnergyToChargeNumber(NumberEntity):
+    """Target energy to charge in kWh."""
 
-        state = await self.async_get_last_state()
-        if state is not None:
-            await self.async_set_native_value(float(state.state))
+    def __init__(self, hass, ip_address):
+        self._hass = hass
+        self._ip_address = ip_address
+        self._state = 0.0
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "energy_to_charge"  # opcional si añades traducciones
+
+    @property
+    def unique_id(self):
+        return "v2c_energy_to_charge"
+
+    @property
+    def name(self):
+        return "Energy to charge"
+
+    @property
+    def device_info(self):
+        return DeviceInfo(
+            identifiers={("v2c_trydan", self._ip_address)},
+            name=f"V2C Trydan ({self._ip_address})",
+            manufacturer="V2C",
+            model="Trydan",
+            configuration_url=f"http://{self._ip_address}",
+        )
+
+    @property
+    def native_unit_of_measurement(self):
+        return "kWh"
+
+    @property
+    def native_step(self):
+        return 0.1
+
+    @property
+    def native_min_value(self):
+        return 0.0
+
+    @property
+    def native_max_value(self):
+        return 200.0
+
+    @property
+    def native_value(self):
+        return float(self._state)
+
+    async def async_set_native_value(self, value: float) -> None:
+        self._state = float(value)
+        await self.async_update_ha_state()
 
 class IntensityNumber(CoordinatorEntity, NumberEntity):
     """Representation of intensity number entity."""
@@ -372,7 +418,7 @@ class IntensityNumber(CoordinatorEntity, NumberEntity):
             _LOGGER.error(f"Error setting intensity: {err}")
             raise
 
-class MaxPrice(RestoreNumber):
+class MaxPrice(NumberEntity):
     """Representation of max price number entity."""
     
     def __init__(self, hass, ip_address):
@@ -428,11 +474,3 @@ class MaxPrice(RestoreNumber):
             self.async_write_ha_state()
         else:
             _LOGGER.error("v2c_MaxPrice must be between 0 and 1")
-
-    async def async_added_to_hass(self) -> None:
-        """When entity is added to Home Assistant."""
-        await super().async_added_to_hass()
-
-        state = await self.async_get_last_state()
-        if state is not None:
-            await self.async_set_native_value(float(state.state))

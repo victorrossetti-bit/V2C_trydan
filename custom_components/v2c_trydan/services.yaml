@@ -1,0 +1,13 @@
+charge_until_energy:
+  name: Charge until energy
+  description: Start charging and stop when session energy reaches target_kwh.
+  fields:
+    target_kwh:
+      name: Target kWh
+      description: Session energy target to reach before pausing.
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 200
+          step: 0.1

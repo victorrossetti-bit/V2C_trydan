@@ -169,6 +169,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.error(f"Invalid v2c_max_intensity: {max_intensity}. Must be an integer.")
         else:
             _LOGGER.error("v2c_max_intensity not provided")
+    
+    async def charge_until_energy(call: ServiceCall):
+        target = float(call.data.get("target_kwh", 0))
+        # setea el número y despausa
+        await hass.services.async_call("number", "set_value", {
+            "entity_id": "number.v2c_energy_to_charge",
+            "value": target
+        })
+        await hass.services.async_call("switch", "turn_off", {
+            "entity_id": "switch.v2c_trydan_switch_paused"
+        })
+
+    
 
     hass.services.async_register(DOMAIN, "set_min_intensity", set_min_intensity)
     hass.services.async_register(DOMAIN, "set_max_intensity", set_max_intensity)
@@ -177,7 +190,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.services.async_register(DOMAIN, "set_min_intensity_slider", set_min_intensity_slider)
     hass.services.async_register(DOMAIN, "set_max_intensity_slider", set_max_intensity_slider)
     hass.services.async_register(DOMAIN, "set_dynamic_power_mode_slider", set_dynamic_power_mode_slider)
-
+    hass.services.async_register(DOMAIN, "charge_until_energy", charge_until_energy)
+    
     return True
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -232,3 +246,5 @@ async def async_set_intensity(hass: HomeAssistant, ip_address: str, intensity: i
             _LOGGER.debug(f"Intensity set to {intensity} at {ip_address}")
     except aiohttp.ClientError as err:
         _LOGGER.error(f"Error setting intensity: {err}")
+
+

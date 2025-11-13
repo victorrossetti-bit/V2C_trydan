@@ -206,6 +206,9 @@ async def async_setup_entry(hass: HomeAssistant, config_entry, async_add_entitie
             for key in coordinator.data.keys()
         ]
         sensors.append(ChargeKmSensor(coordinator, ip_address, kwh_per_100km))
+
+        sensors.append(ChargeEnergyTargetSensor(coordinator, ip_address))
+
         sensors.append(NumericalStatus(coordinator, ip_address))
 
         # Add PVPC price sensor if configured
@@ -528,6 +531,106 @@ class ChargeKmSensor(CoordinatorEntity, SensorEntity):
     @property
     def state_class(self):
         return SensorStateClass.MEASUREMENT
+    
+# --- NUEVO: sensor vigilante por energía ---
+class ChargeEnergyTargetSensor(CoordinatorEntity, SensorEntity):
+    """Stops charging when session energy reaches target kWh."""
+
+    def __init__(self, coordinator, ip_address):
+        super().__init__(coordinator)
+        self._ip_address = ip_address
+        self._attr_has_entity_name = True
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        # chequeo periódico (igual que ChargeKmSensor)
+        async_track_time_interval(self.hass, self._check_and_stop, timedelta(seconds=10))
+        # si pausan manualmente, resetea el objetivo a 0 (opcional, igual que km)
+        async_track_state_change_event(
+            self.hass, ["switch.v2c_trydan_switch_paused"], self._handle_paused
+        )
+
+    async def _handle_paused(self, event):
+        old_state = event.data.get("old_state")
+        new_state = event.data.get("new_state")
+        if new_state is not None and old_state is not None:
+            if new_state.state == "on" and old_state.state == "off":
+                await self._set_energy_target(0)
+
+    async def _set_energy_target(self, value):
+        await self.hass.services.async_call(
+            "number", "set_value",
+            {"entity_id": "number.v2c_energy_to_charge", "value": value},
+        )
+
+    async def _check_and_stop(self, now):
+        if not self.coordinator.data:
+            return
+
+        # lee objetivo y sesión
+        energy_target = self.hass.states.get("number.v2c_energy_to_charge")
+        if energy_target is None:
+            return
+
+        try:
+            target_kwh = float(energy_target.state)
+        except (TypeError, ValueError):
+            target_kwh = 0.0
+
+        if target_kwh <= 0:
+            return
+
+        session_kwh = float(self.coordinator.data.get("ChargeEnergy", 0) or 0)
+
+        if session_kwh >= target_kwh:
+            # pausa y bloquea igual que en km
+            await self.hass.services.async_call("switch", "turn_on", {"entity_id": "switch.v2c_trydan_switch_paused"})
+            await self.hass.services.async_call("switch", "turn_on", {"entity_id": "switch.v2c_trydan_switch_locked"})
+            await self._set_energy_target(0)
+            # evento nuevo desacoplado de km
+            self.hass.bus.async_fire("v2c_trydan.energy_target_reached", {
+                "target_kwh": target_kwh,
+                "session_kwh": session_kwh,
+            })
+
+    @property
+    def unique_id(self):
+        return f"{self._ip_address}_ChargeEnergyTarget"
+
+    @property
+    def name(self):
+        return "V2C Trydan Energy Target"
+
+    @property
+    def device_info(self):
+        return DeviceInfo(
+            identifiers={("v2c_trydan", self._ip_address)},
+            name=f"V2C Trydan ({self._ip_address})",
+            manufacturer="V2C",
+            model="Trydan",
+            configuration_url=f"http://{self._ip_address}",
+        )
+
+    @property
+    def native_value(self):
+        # opcional: exponer el objetivo actual para visualizar
+        energy_target = self.hass.states.get("number.v2c_energy_to_charge")
+        try:
+            return float(energy_target.state) if energy_target else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    @property
+    def device_class(self):
+        return SensorDeviceClass.ENERGY
+
+    @property
+    def native_unit_of_measurement(self):
+        return "kWh"
+
+    @property
+    def state_class(self):
+        return SensorStateClass.MEASUREMENT
 
 class NumericalStatus(CoordinatorEntity, SensorEntity):
     """Representation of a V2C Trydan numerical status sensor."""
@@ -699,10 +802,7 @@ class PrecioLuzEntity(CoordinatorEntity, SensorEntity):
                 precio_luz_entity = None
 
             if all([precio_luz_entity, paused_switch, v2c_carga_pvpc_switch, max_price_entity]):
-                try:
-                    max_price = float(max_price_entity.state)
-                except (ValueError,TypeError):
-                    max_price = 0.0
+                max_price = float(max_price_entity.state)
                 current_hour = datetime.now().hour
 
                 self.valid_hours, self.valid_hours_next_day, self.total_hours = await extract_price_attrs(
