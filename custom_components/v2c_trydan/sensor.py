@@ -1,4 +1,5 @@
 import logging
+import math
 import asyncio
 from datetime import timedelta, datetime, timezone
 
@@ -540,15 +541,30 @@ class ChargeEnergyTargetSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._ip_address = ip_address
         self._attr_has_entity_name = True
+        self._energy_reference = None
+        self._last_target_kwh = 0.0
+        self._remove_interval = None
+        self._remove_paused_listener = None
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
         # chequeo periódico (igual que ChargeKmSensor)
-        async_track_time_interval(self.hass, self._check_and_stop, timedelta(seconds=10))
+        self._remove_interval = async_track_time_interval(
+            self.hass, self._check_and_stop, timedelta(seconds=10)
+        )
         # si pausan manualmente, resetea el objetivo a 0 (opcional, igual que km)
-        async_track_state_change_event(
+        self._remove_paused_listener = async_track_state_change_event(
             self.hass, ["switch.v2c_trydan_switch_paused"], self._handle_paused
         )
+
+    async def async_will_remove_from_hass(self) -> None:
+        await super().async_will_remove_from_hass()
+        if self._remove_interval:
+            self._remove_interval()
+            self._remove_interval = None
+        if self._remove_paused_listener:
+            self._remove_paused_listener()
+            self._remove_paused_listener = None
 
     async def _handle_paused(self, event):
         old_state = event.data.get("old_state")
@@ -556,6 +572,7 @@ class ChargeEnergyTargetSensor(CoordinatorEntity, SensorEntity):
         if new_state is not None and old_state is not None:
             if new_state.state == "on" and old_state.state == "off":
                 await self._set_energy_target(0)
+                self._reset_target_tracking()
 
     async def _set_energy_target(self, value):
         await self.hass.services.async_call(
@@ -563,34 +580,58 @@ class ChargeEnergyTargetSensor(CoordinatorEntity, SensorEntity):
             {"entity_id": "number.v2c_energy_to_charge", "value": value},
         )
 
+    def _reset_target_tracking(self):
+        self._energy_reference = None
+        self._last_target_kwh = 0.0
+
+    def _get_target_state(self):
+        energy_target = self.hass.states.get("number.v2c_energy_to_charge")
+        if energy_target is None:
+            return 0.0
+        try:
+            return float(energy_target.state)
+        except (TypeError, ValueError):
+            return 0.0
+
     async def _check_and_stop(self, now):
         if not self.coordinator.data:
             return
 
-        # lee objetivo y sesión
-        energy_target = self.hass.states.get("number.v2c_energy_to_charge")
-        if energy_target is None:
-            return
-
-        try:
-            target_kwh = float(energy_target.state)
-        except (TypeError, ValueError):
-            target_kwh = 0.0
-
+        target_kwh = self._get_target_state()
         if target_kwh <= 0:
+            self._reset_target_tracking()
             return
 
         session_kwh = float(self.coordinator.data.get("ChargeEnergy", 0) or 0)
 
-        if session_kwh >= target_kwh:
+        if self._energy_reference is None:
+            # primera vez para este objetivo, toma base para contar energía desde aquí
+            self._energy_reference = session_kwh
+            self._last_target_kwh = target_kwh
+            return
+
+        if not math.isclose(target_kwh, self._last_target_kwh, rel_tol=1e-03, abs_tol=1e-03):
+            # objetivo cambió, reiniciar referencia
+            self._energy_reference = session_kwh
+            self._last_target_kwh = target_kwh
+
+        # si el cargador reinició el contador, actualiza referencia
+        if session_kwh < self._energy_reference:
+            self._energy_reference = session_kwh
+            return
+
+        delivered = max(0.0, session_kwh - self._energy_reference)
+
+        if delivered >= target_kwh:
             # pausa y bloquea igual que en km
             await self.hass.services.async_call("switch", "turn_on", {"entity_id": "switch.v2c_trydan_switch_paused"})
             await self.hass.services.async_call("switch", "turn_on", {"entity_id": "switch.v2c_trydan_switch_locked"})
             await self._set_energy_target(0)
+            self._reset_target_tracking()
             # evento nuevo desacoplado de km
             self.hass.bus.async_fire("v2c_trydan.energy_target_reached", {
                 "target_kwh": target_kwh,
-                "session_kwh": session_kwh,
+                "session_kwh": delivered,
             })
 
     @property

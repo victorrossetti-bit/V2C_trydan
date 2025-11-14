@@ -171,15 +171,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.error("v2c_max_intensity not provided")
     
     async def charge_until_energy(call: ServiceCall):
-        target = float(call.data.get("target_kwh", 0))
-        # setea el número y despausa
-        await hass.services.async_call("number", "set_value", {
-            "entity_id": "number.v2c_energy_to_charge",
-            "value": target
-        })
-        await hass.services.async_call("switch", "turn_off", {
-            "entity_id": "switch.v2c_trydan_switch_paused"
-        })
+        try:
+            target = float(call.data.get("target_kwh", 0))
+        except (TypeError, ValueError):
+            _LOGGER.error("charge_until_energy requiere un valor numérico en target_kwh")
+            return
+
+        # setea el número objetivo
+        await hass.services.async_call(
+            "number",
+            "set_value",
+            {
+                "entity_id": "number.v2c_energy_to_charge",
+                "value": target,
+            },
+        )
+
+        if target <= 0:
+            _LOGGER.info("Objetivo de energía limpiado; no se reanudará la carga automáticamente")
+            return
+
+        # reanuda la carga desbloqueando si hace falta
+        await hass.services.async_call(
+            "switch",
+            "turn_off",
+            {"entity_id": "switch.v2c_trydan_switch_paused"},
+        )
+        await hass.services.async_call(
+            "switch",
+            "turn_off",
+            {"entity_id": "switch.v2c_trydan_switch_locked"},
+        )
 
     
 
@@ -246,5 +268,3 @@ async def async_set_intensity(hass: HomeAssistant, ip_address: str, intensity: i
             _LOGGER.debug(f"Intensity set to {intensity} at {ip_address}")
     except aiohttp.ClientError as err:
         _LOGGER.error(f"Error setting intensity: {err}")
-
-

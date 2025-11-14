@@ -1,6 +1,6 @@
-from homeassistant.components.number import NumberEntity
+from homeassistant.components.number import NumberEntity, RestoreNumber
 from homeassistant.components.sensor import SensorStateClass
-from homeassistant.const import DEVICE_DEFAULT_NAME, CONF_IP_ADDRESS
+from homeassistant.const import DEVICE_DEFAULT_NAME, CONF_IP_ADDRESS, STATE_UNKNOWN
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -280,7 +280,7 @@ class KmToChargeNumber(NumberEntity):
             _LOGGER.error("v2c_km_to_charge must be between 0 and 1000")
 
 # --- NUEVO: número objetivo en kWh ---
-class EnergyToChargeNumber(NumberEntity):
+class EnergyToChargeNumber(RestoreNumber):
     """Target energy to charge in kWh."""
 
     def __init__(self, hass, ip_address):
@@ -330,7 +330,17 @@ class EnergyToChargeNumber(NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         self._state = float(value)
-        await self.async_update_ha_state()
+        self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state not in (None, STATE_UNKNOWN, "unknown", "unavailable"):
+            try:
+                self._state = float(last_state.state)
+            except (TypeError, ValueError):
+                self._state = 0.0
+        self.async_write_ha_state()
 
 class IntensityNumber(CoordinatorEntity, NumberEntity):
     """Representation of intensity number entity."""
